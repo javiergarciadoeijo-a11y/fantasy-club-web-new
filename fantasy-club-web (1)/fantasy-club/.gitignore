@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.DS_Store
+android/
+ios/
+*.keystore
+*.jks
+*.p12
+*.mobileprovision

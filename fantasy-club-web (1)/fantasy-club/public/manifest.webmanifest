@@ -1,0 +1,13 @@
+{
+  "id": "/",
+  "name": "Fantasy Club — Liga privada",
+  "short_name": "Fantasy Club",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1020",
+  "theme_color": "#0b1020",
+  "lang": "es",
+  "description": "Liga privada de fantasy de fútbol. Reglamento v6.0."
+}
