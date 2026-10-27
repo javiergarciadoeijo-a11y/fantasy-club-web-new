@@ -31,7 +31,97 @@ async function renderPage(){document.querySelectorAll('[data-page]').forEach(b=>
  else if(activePage==='reglas'){c.innerHTML=`<div class="rules"><section class="panel"><h2>Puntuación individual</h2><p>Base = floor(goles/5) + floor(asistencias/3) + victorias − floor(derrotas/2). Empates: 0. Los restos no se arrastran.</p></section><section class="panel"><h2>MVP</h2><p>Voto ordenado 3, 2, 1. Desempates: primeras posiciones; después, puntos base. Si persiste, MVP compartido. Multiplicador ×1,5 a cada MVP compartido con puntos base positivos.</p></section><section class="panel"><h2>Fantasy</h2><p>Exactamente tres jugadores disponibles. Suma de puntos finales. Sin sustituciones. Los tres elegidos se bloquean para la siguiente jornada oficial disputada. Canceladas no consumen la restricción.</p></section><section class="panel"><h2>Auditoría</h2><p>Las correcciones, cambios de fuente, cierres, reaperturas y cancelaciones exigen motivo. Los datos incompletos no se convierten en cero definitivo hasta su confirmación.</p></section></div>`}
  c.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{activePage=b.dataset.go;renderPage()});}
 async function loadPickUI(){const {data:old}=await supabase.from('fantasy_picks').select('player_id').eq('round_id',currentRound.id).eq('user_id',session.user.id);picks=(old||[]).map(x=>x.player_id);const {data:avail}=await supabase.from('round_availability').select('player_id,available').eq('round_id',currentRound.id);const available=new Set((avail||[]).filter(x=>x.available).map(x=>x.player_id));$('#picklist').innerHTML=players.map(p=>`<label class="pickrow"><input type="checkbox" value="${p.id}" ${picks.includes(p.id)?'checked':''} ${!available.has(p.id)?'disabled':''}><span><b>${esc(p.name)}</b><small>${esc(p.team||'')}</small></span></label>`).join('');$('#savepicks').onclick=async()=>{const ids=[...$('#picklist').querySelectorAll('input:checked')].map(x=>x.value);if(ids.length!==3){toast('Debes elegir exactamente tres jugadores.');return}const {error}=await supabase.rpc('save_fantasy_picks',{p_round_id:currentRound.id,p_player_ids:ids});toast(error?error.message:'Selección guardada.');if(!error)picks=ids}}
-async function loadVoteUI(){const {data:avail}=await supabase.from('round_availability').select('player_id,available').eq('round_id',currentRound.id);const available=new Set((avail||[]).filter(x=>x.available).map(x=>x.player_id));const {data:old}=await supabase.from('mvp_votes').select('player_id,rank').eq('round_id',currentRound.id).eq('voter_id',session.user.id).order('rank');vote=(old||[]).map(x=>x.player_id);$('#votelist').innerHTML=players.filter(p=>available.has(p.id)).map(p=>{let i=vote.indexOf(p.id);return `<button class="pickrow ${i>=0?'chosen':''}" data-vote="${p.id}"><span class="ord">${i<0?'＋':['🥇','🥈','🥉'][i]}</span><span><b>${esc(p.name)}</b><small>${esc(p.team||'')}</small></span></button>`}).join('');$('#votelist').querySelectorAll('[data-vote]').forEach(b=>b.onclick=()=>{const id=b.dataset.vote;if(vote.includes(id))vote=vote.filter(x=>x!==id);else if(vote.length<3)vote.push(id);else toast('Elige exactamente tres candidatos.');loadVoteUI()});$('#savevote').onclick=async()=>{if(vote.length!==3){toast('Ordena tres candidatos.');return}const {error}=await supabase.rpc('save_mvp_vote',{p_round_id:currentRound.id,p_player_ids:vote});toast(error?error.message:'Voto guardado de forma privada.')}}
+
+async function loadVoteUI() {
+  const { data: avail, error: availError } = await supabase
+    .from('round_availability')
+    .select('player_id, available')
+    .eq('round_id', currentRound.id);
+
+  if (availError) {
+    toast('Error al cargar disponibilidad: ' + availError.message);
+    return;
+  }
+
+  const available = new Set(
+    (avail || []).filter(x => x.available).map(x => x.player_id)
+  );
+
+  const { data: old, error: voteError } = await supabase
+    .from('mvp_votes')
+    .select('player_id, rank')
+    .eq('round_id', currentRound.id)
+    .eq('voter_id', session.user.id)
+    .order('rank');
+
+  if (voteError) {
+    toast('Error al cargar el voto: ' + voteError.message);
+    return;
+  }
+
+  vote = (old || []).map(x => x.player_id);
+
+  const list = $('#votelist');
+
+  list.innerHTML = players
+    .filter(p => available.has(p.id))
+    .map(p => {
+      const i = vote.indexOf(p.id);
+      const medal = ['🥇', '🥈', '🥉'];
+
+      return `
+        <button type="button"
+          class="pickrow ${i >= 0 ? 'chosen' : ''}"
+          data-vote="${p.id}">
+          <span class="ord">${i >= 0 ? medal[i] : '＋'}</span>
+          <span>
+            <b>${esc(p.name)}</b>
+            <small>${esc(p.team || '')}</small>
+          </span>
+        </button>`;
+    }).join('');
+
+  list.querySelectorAll('[data-vote]').forEach(button => {
+    button.addEventListener('click', event => {
+      event.preventDefault();
+
+      const id = button.dataset.vote;
+      const index = vote.indexOf(id);
+
+      if (index >= 0) {
+        vote.splice(index, 1);
+      } else if (vote.length < 3) {
+        vote.push(id);
+      } else {
+        toast('Ya has elegido tres candidatos. Quita uno para cambiar tu selección.');
+        return;
+      }
+
+      list.querySelectorAll('[data-vote]').forEach(b => {
+        const rank = vote.indexOf(b.dataset.vote);
+        b.classList.toggle('chosen', rank >= 0);
+        b.querySelector('.ord').textContent =
+          rank >= 0 ? ['🥇', '🥈', '🥉'][rank] : '＋';
+      });
+    });
+  });
+
+  $('#savevote').onclick = async () => {
+    if (vote.length !== 3) {
+      toast('Debes elegir exactamente tres candidatos.');
+      return;
+    }
+
+    const { error } = await supabase.rpc('save_mvp_vote', {
+      p_round_id: currentRound.id,
+      p_player_ids: vote
+    });
+
+    toast(error ? 'Error al guardar el voto: ' + error.message
+                : 'Voto guardado de forma privada.');
+  };
+}
+
 function wireAdmin(){ $('#openround').onclick=async()=>{const n=+$('#roundno').value,reason=$('#roundreason').value.trim();if(!n||!reason){toast('Número y motivo son obligatorios.');return}const {error}=await supabase.rpc('admin_open_round',{p_league_id:league.id,p_number:n,p_reason:reason});toast(error?error.message:'Jornada abierta.');if(!error){await refresh();renderPage()}};$('#addplayer').onclick=async()=>{const name=$('#pname').value.trim(),team=$('#pteam').value.trim(),role=$('#prole').value.trim();if(!name){toast('El nombre es obligatorio.');return}const {error}=await supabase.from('players').insert({league_id:league.id,name,team,role});toast(error?error.message:'Jugador añadido.');if(!error){await refresh();renderPage()}};$('#savestats').onclick=async()=>{const reason=$('#statreason').value.trim();if(!reason){toast('El motivo es obligatorio.');return}const {error}=await supabase.rpc('admin_set_manual_stats',{p_league_id:league.id,p_round_id:adminRound?.id,p_player_id:$('#statplayer').value,p_goals:+$('#goals').value,p_assists:+$('#assists').value,p_wins:+$('#wins').value,p_losses:+$('#losses').value,p_reason:reason});toast(error?error.message:'Estadísticas guardadas.');if(!error){await refresh();renderPage()}};$('#saveevents').onclick=async()=>{const reason=$('#eventreason').value.trim();if(!reason){toast('El motivo/fuente es obligatorio.');return}if(!adminRound){toast('No hay jornada que gestionar.');return}const events=[['goal','eventgoals'],['assist','eventassists'],['win','eventwins'],['draw','eventdraws'],['loss','eventlosses']].map(([event_type,id])=>({event_type,quantity:+$('#'+id).value})).filter(x=>x.quantity>0);const {error}=await supabase.rpc('admin_replace_events',{p_league_id:league.id,p_round_id:adminRound.id,p_player_id:$('#eventplayer').value,p_events:events,p_reason:reason});toast(error?error.message:'Eventos guardados como fuente activa.');if(!error){await refresh();renderPage()}};const controlReason=()=>$('#roundcontrolreason')?.value.trim()||'';const needReason=()=>{if(!controlReason()){toast('El motivo es obligatorio.');return false}if(!adminRound){toast('No hay jornada que gestionar.');return false}return true};$('#confirmstats').onclick=async()=>{if(!needReason())return;const {error}=await supabase.rpc('admin_confirm_stats',{p_round_id:adminRound.id,p_reason:controlReason()});toast(error?error.message:'Estadísticas confirmadas.');if(!error){await refresh();renderPage()}};$('#closeround').onclick=async()=>{if(!needReason())return;const {error}=await supabase.rpc('admin_close_round',{p_round_id:adminRound.id,p_reason:controlReason()});toast(error?error.message:'Jornada cerrada y recalculada.');if(!error){await refresh();renderPage()}};$('#cancelround').onclick=async()=>{if(!needReason())return;if(!confirm('¿Cancelar la jornada? No otorgará puntos ni MVP.'))return;const {error}=await supabase.rpc('admin_cancel_round',{p_round_id:adminRound.id,p_reason:controlReason()});toast(error?error.message:'Jornada cancelada.');if(!error){await refresh();renderPage()}};$('#reopenround').onclick=async()=>{if(!needReason())return;const {error}=await supabase.rpc('admin_reopen_round',{p_round_id:adminRound.id,p_unlock_picks:$('#unlockpicks').checked,p_unlock_votes:$('#unlockvotes').checked,p_reason:controlReason()});toast(error?error.message:'Jornada reabierta.');if(!error){await refresh();renderPage()}};$('#saveavailability').onclick=async()=>{const reason=$('#availreason').value.trim();if(!reason||!adminRound){toast('Jornada y motivo obligatorios.');return}const {error}=await supabase.rpc('admin_set_availability',{p_round_id:adminRound.id,p_player_id:$('#availplayer').value,p_available:$('#availvalue').value==='true',p_reason:reason});toast(error?error.message:'Disponibilidad corregida.');if(!error){await refresh();renderPage()}};$('#saveparticipation').onclick=async()=>{const reason=$('#partreason').value.trim();if(!reason||!adminRound){toast('Jornada y motivo obligatorios.');return}const {error}=await supabase.rpc('admin_set_participation',{p_league_id:league.id,p_round_id:adminRound.id,p_player_id:$('#partplayer').value,p_participated:$('#partvalue').value==='true',p_reason:reason});toast(error?error.message:'Participación actualizada.');if(!error){await refresh();renderPage()}}}
 async function boot(){if(!supabase){authScreen();return}const {data}=await supabase.auth.getSession();session=data.session;if(session){await initData();shell()}else authScreen();supabase.auth.onAuthStateChange(async(_event,s)=>{session=s;if(s){await initData();shell()}else authScreen()})}
 boot();
